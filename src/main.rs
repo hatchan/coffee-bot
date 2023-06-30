@@ -9,31 +9,30 @@ struct Args {
     ready: u64,
     #[arg(short, long)]
     no_more: u64,
-}
-
-static COFFEE_READY: &'static str =  "https://hooks.slack.com/workflows/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";
-static COFFEE_NO_MORE: &'static str = "https://hooks.slack.com/workflows/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";
-
-enum Coffee {
-    Ready,
-    NoMore,
+    #[arg(short, long, env)]
+    ready_url: String,
+    #[arg(short, long, env)]
+    no_more_url: String,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
+    let coffee_ready_url = args.ready_url.clone();
+    let coffee_no_more_url = args.no_more_url.clone();
+
     // coffee ready
     let ready = tokio::spawn(async move {
         let pin = Pin::new(args.ready);
-        if let Err(e) = monitor_button(pin, Coffee::Ready).await {
+        if let Err(e) = monitor_button(pin, &coffee_ready_url).await {
             eprintln!("Error: {}", e);
         }
     });
 
     let no_more = tokio::spawn(async move {
         let pin = Pin::new(args.no_more);
-        if let Err(e) = monitor_button(pin, Coffee::NoMore).await {
+        if let Err(e) = monitor_button(pin, &coffee_no_more_url).await {
             eprintln!("Error: {}", e);
         }
     });
@@ -41,7 +40,7 @@ async fn main() {
     let _ = (ready.await, no_more.await);
 }
 
-async fn monitor_button(pin: Pin, program: Coffee) -> sysfs_gpio::Result<()> {
+async fn monitor_button(pin: Pin, url: &str) -> sysfs_gpio::Result<()> {
     pin.export()?;
     pin.set_direction(Direction::In)?;
     pin.set_edge(sysfs_gpio::Edge::BothEdges)?;
@@ -56,10 +55,7 @@ async fn monitor_button(pin: Pin, program: Coffee) -> sysfs_gpio::Result<()> {
                         continue;
                     }
 
-                    match program {
-                        Coffee::Ready => send_slack_message(COFFEE_READY).await,
-                        Coffee::NoMore => send_slack_message(COFFEE_NO_MORE).await,
-                    }
+                    send_slack_message(url).await;
 
                     now = Instant::now();
                 }
