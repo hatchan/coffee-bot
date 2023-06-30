@@ -1,5 +1,12 @@
 use clap::Parser;
-use std::time::{Duration, Instant};
+use slack_morphism::{
+    prelude::{SlackApiTestRequest, SlackClientHyperConnector},
+    *,
+};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use sysfs_gpio::{Direction, Pin};
 
 #[derive(Parser)]
@@ -10,29 +17,48 @@ struct Args {
     #[arg(short, long)]
     no_more: u64,
     #[arg(short, long, env)]
-    ready_url: String,
-    #[arg(short, long, env)]
-    no_more_url: String,
+    slack_token: String,
+}
+
+enum CoffeeState {
+    Ready,
+    NoMore,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
-    let coffee_ready_url = args.ready_url.clone();
-    let coffee_no_more_url = args.no_more_url.clone();
+    let slack_client = Arc::new(SlackClient::new(SlackClientHyperConnector::new()));
+    let token = SlackApiToken::new(args.slack_token.into());
+
+    //if let Err(e) = session
+    //    .api_test(&SlackApiTestRequest::new().with_foo("Test".into()))
+    //    .await
+    //{
+    //    eprintln!("Slack API connection error: {}", e);
+    //    return;
+    //}
+
+    SlackStateWo
+    let ready_client = slack_client.clone();
+    let no_more_client = slack_client.clone();
+
+    let ready_token = token.clone();
+    let no_more_token = token.clone();
+
 
     // coffee ready
     let ready = tokio::spawn(async move {
         let pin = Pin::new(args.ready);
-        if let Err(e) = monitor_button(pin, &coffee_ready_url).await {
+        if let Err(e) = monitor_button(CoffeeState::Ready, pin, ready_client, ready_token).await {
             eprintln!("Error: {}", e);
         }
     });
 
     let no_more = tokio::spawn(async move {
         let pin = Pin::new(args.no_more);
-        if let Err(e) = monitor_button(pin, &coffee_no_more_url).await {
+        if let Err(e) = monitor_button(CoffeeState::NoMore, pin, no_more_client, no_more_token).await {
             eprintln!("Error: {}", e);
         }
     });
@@ -40,7 +66,15 @@ async fn main() {
     let _ = (ready.await, no_more.await);
 }
 
-async fn monitor_button(pin: Pin, url: &str) -> sysfs_gpio::Result<()> {
+async fn monitor_button<SCHC>(
+    state: CoffeeState,
+    pin: Pin,
+    client: Arc<SlackClient<SCHC>>,
+    token: SlackApiToken,
+) -> sysfs_gpio::Result<()>
+where
+    SCHC: SlackClientHttpConnector + Send + Sync,
+{
     pin.export()?;
     pin.set_direction(Direction::In)?;
     pin.set_edge(sysfs_gpio::Edge::BothEdges)?;
@@ -55,7 +89,13 @@ async fn monitor_button(pin: Pin, url: &str) -> sysfs_gpio::Result<()> {
                         continue;
                     }
 
-                    send_slack_message(url).await;
+                    match state {
+                        CoffeeState::Ready => send_message(client, &token).await,
+                        CoffeeState::NoMore => add_reaction(client, &token).await,
+                    }
+
+                    // TODO: either send message or add reaction to last message
+
 
                     now = Instant::now();
                 }
@@ -65,14 +105,12 @@ async fn monitor_button(pin: Pin, url: &str) -> sysfs_gpio::Result<()> {
     }
 }
 
-async fn send_slack_message(url: &str) -> () {
-    println!("Sending slack message: {}", url);
-    match reqwest::get(url).await {
-        Ok(v) => {
-            println!("Response: {}", v.status());
-        }
-        Err(e) => {
-            eprintln!("Error: {}", e);
-        }
-    }
+async fn add_reaction<SCHC>(client: Arc<SlackClient<SCHC>>, token: &SlackApiToken) where SCHC: SlackClientHttpConnector + Send + Sync {
+    todo!()
 }
+
+async fn send_message<SCHC>(client: Arc<SlackClient<SCHC>>, token: SlackApiToken) where SCHC: SlackClientHttpConnector + Send + Sync {
+    todo!()
+}
+
+
