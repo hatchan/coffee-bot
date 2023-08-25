@@ -6,10 +6,7 @@ use slack_morphism::{
     },
     SlackApiToken, SlackClient, SlackClientHttpConnector, SlackMessageContent, SlackTs,
 };
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use sysfs_gpio::{Direction, Pin};
 use tokio::{
     join,
@@ -35,32 +32,15 @@ async fn main() {
     let no_more_client = SlackClient::new(SlackClientHyperConnector::new());
     let token = SlackApiToken::new(args.slack_token.into());
 
-    //let ready_client = slack_client.clone();
-    //let no_more_client = slack_client.clone();
-
     let ready_token = token.clone();
     let no_more_token = token.clone();
 
     let (tx, rx) = watch::channel(None);
 
-    let _ = tokio::join!(
+    let _ = join!(
         ready_coffee_button(args.ready, ready_client, ready_token, tx),
         no_more_coffee_button(args.no_more, no_more_client, no_more_token, rx)
     );
-
-    //let ready = tokio::spawn(async move {
-    //    if let Err(e) = ready_coffee_button(args.ready, ready_client, ready_token, tx).await {
-    //        eprintln!("Error: {}", e);
-    //    };
-    //    println!("Ready task finished");
-    //});
-    //
-    //let no_more = tokio::spawn(async move {
-    //    if let Err(e) = no_more_coffee_button(args.no_more, no_more_client, no_more_token, rx).await
-    //    {
-    //    };
-    //    println!("No more task finished");
-    //});
 }
 
 async fn ready_coffee_button<SCHC>(
@@ -80,7 +60,6 @@ where
     let mut now = Instant::now() - Duration::from_secs(60);
 
     loop {
-        // TODO: emulate this on laptop using keyboard events as opposed to listening to GPIO pins
         match poller.poll(10)? {
             Some(value) => {
                 if value == 1 {
@@ -149,32 +128,6 @@ where
         SlackMessageContent::new().with_text("☕".to_owned()),
     );
 
-    //let post_msg_resp = session.chat_post_message(&post_msg_req).await?; // BUG: Gets stuck
-
-    //match tokio::time::timeout(
-    //    Duration::from_secs(5),
-    //    session.chat_post_message(&post_msg_req),
-    //)
-    //.await
-    //{
-    //    Err(_) => {
-    //        println!("did not receive value within 5s");
-    //        Ok(())
-    //    }
-    //    Ok(Err(error)) => {
-    //        println!("error: {}", error);
-    //        Ok(())
-    //    }
-    //    Ok(Ok(post_msg_resp)) => {
-    //        println!(
-    //            "Message sent! TS: {}, Channel: {}",
-    //            post_msg_resp.ts, post_msg_resp.channel
-    //        );
-    //        tx.send_replace(Some(post_msg_resp.ts));
-    //        Ok(())
-    //    }
-    //}
-
     match session.chat_post_message(&post_msg_req).await {
         Ok(post_msg_resp) => {
             println!(
@@ -194,15 +147,14 @@ where
 async fn add_reaction<SCHC>(
     client: SlackClient<SCHC>,
     token: &SlackApiToken,
-    mut rx: Receiver<Option<SlackTs>>,
+    rx: Receiver<Option<SlackTs>>,
 ) -> Result<(), SlackClientError>
 where
     SCHC: SlackClientHttpConnector + Send + Sync,
 {
     println!("Adding reaction");
     let session = client.open_session(token);
-     let last_message_ts = rx.wait_for(Option::is_some).await.unwrap().clone();
-    //let last_message_ts = rx.borrow().clone();
+    let last_message_ts = rx.borrow().clone();
 
     match last_message_ts {
         Some(ts) => {
