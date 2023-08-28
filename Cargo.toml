@@ -10,5 +10,6 @@ anyhow = "1.0.71"
 clap = { version = "4.3.10", features = ["derive", "env"] }
 reqwest = { version = "0.11.18", features = ["json", "rustls-tls"], default-features = false }
 serde = { version = "1.0.164", features = ["derive"] }
+slack-morphism = { version = "1.12.0", features = ["hyper"] }
 sysfs_gpio = "0.6.1"
 tokio = { version = "1.29.1", features = ["macros", "rt-multi-thread"] }
