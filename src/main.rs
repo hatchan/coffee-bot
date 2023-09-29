@@ -4,14 +4,12 @@ use slack_morphism::{
     prelude::{
         SlackApiChatPostMessageRequest, SlackApiReactionsAddRequest, SlackClientHyperConnector,
     },
-    SlackApiToken, SlackClient, SlackClientHttpConnector, SlackMessageContent, SlackTs,
+    SlackApiToken, SlackChannelId, SlackClient, SlackClientHttpConnector, SlackMessageContent,
+    SlackTs,
 };
 use std::time::{Duration, Instant};
 use sysfs_gpio::{Direction, Pin};
-use tokio::{
-    join,
-    sync::watch::{self, Receiver, Sender},
-};
+use tokio::sync::watch::{self, Receiver, Sender};
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -22,6 +20,12 @@ struct Args {
     no_more: u64,
     #[arg(short, long, env)]
     slack_token: String,
+}
+
+#[derive(Clone)]
+struct LastMessage {
+    ts: SlackTs,
+    channel: SlackChannelId,
 }
 
 #[tokio::main]
@@ -37,17 +41,31 @@ async fn main() {
 
     let (tx, rx) = watch::channel(None);
 
-    let _ = join!(
-        ready_coffee_button(args.ready, ready_client, ready_token, tx),
-        no_more_coffee_button(args.no_more, no_more_client, no_more_token, rx)
-    );
+    let ready = tokio::spawn(async move {
+        if let Err(e) = ready_coffee_button(args.ready, ready_client, ready_token, tx).await {
+            eprintln!("Error: {}", e);
+        };
+        println!("Ready task finished");
+    });
+
+    let no_more = tokio::spawn(async move {
+        if let Err(e) = no_more_coffee_button(args.no_more, no_more_client, no_more_token, rx).await
+        {
+            eprintln!("Error: {}", e);
+        };
+        println!("No more task finished");
+    });
+
+    println!("Ready to report coffee! Press green button to report coffee ready, red button to report no more coffee");
+
+    let _ = (ready.await, no_more.await);
 }
 
 async fn ready_coffee_button<SCHC>(
     pin_num: u64,
     ready_client: SlackClient<SCHC>,
     ready_token: SlackApiToken,
-    tx: Sender<Option<SlackTs>>,
+    tx: Sender<Option<LastMessage>>,
 ) -> anyhow::Result<()>
 where
     SCHC: SlackClientHttpConnector + Send + Sync + Clone,
@@ -82,7 +100,7 @@ async fn no_more_coffee_button<SCHC>(
     pin_num: u64,
     no_more_client: SlackClient<SCHC>,
     no_more_token: SlackApiToken,
-    rx: Receiver<Option<SlackTs>>,
+    rx: Receiver<Option<LastMessage>>,
 ) -> anyhow::Result<()>
 where
     SCHC: SlackClientHttpConnector + Send + Sync + Clone,
@@ -116,7 +134,7 @@ where
 async fn send_message<SCHC>(
     client: SlackClient<SCHC>,
     token: &SlackApiToken,
-    tx: &Sender<Option<SlackTs>>,
+    tx: &Sender<Option<LastMessage>>,
 ) -> Result<(), SlackClientError>
 where
     SCHC: SlackClientHttpConnector + Send + Sync,
@@ -124,7 +142,7 @@ where
     println!("Sending message");
     let session = client.open_session(token);
     let post_msg_req = SlackApiChatPostMessageRequest::new(
-        "#test-bots-here".into(),
+        "#amsterdam".into(),
         SlackMessageContent::new().with_text("☕".to_owned()),
     );
 
@@ -134,11 +152,14 @@ where
                 "Message sent! TS: {}, Channel: {}",
                 post_msg_resp.ts, post_msg_resp.channel
             );
-            tx.send_replace(Some(post_msg_resp.ts));
+            tx.send_replace(Some(LastMessage {
+                ts: post_msg_resp.ts,
+                channel: post_msg_resp.channel,
+            }));
             Ok(())
         }
         Err(error) => {
-            println!("error: {}", error);
+            eprintln!("Error posting a message: {}", error);
             Ok(())
         }
     }
@@ -147,20 +168,20 @@ where
 async fn add_reaction<SCHC>(
     client: SlackClient<SCHC>,
     token: &SlackApiToken,
-    rx: Receiver<Option<SlackTs>>,
+    rx: Receiver<Option<LastMessage>>,
 ) -> Result<(), SlackClientError>
 where
     SCHC: SlackClientHttpConnector + Send + Sync,
 {
     println!("Adding reaction");
     let session = client.open_session(token);
-    let last_message_ts = rx.borrow().clone();
+    let last_message = rx.borrow().clone();
 
-    match last_message_ts {
-        Some(ts) => {
-            println!("Last message ts found: {}", ts);
+    match last_message {
+        Some(message) => {
+            println!("Last message ts found: {}", message.ts);
             let add_reaction_req =
-                SlackApiReactionsAddRequest::new("#test-bots-here".into(), "zero0".into(), ts);
+                SlackApiReactionsAddRequest::new(message.channel, "zero0".into(), message.ts);
 
             println!("Adding reaction to message: {:?}", add_reaction_req);
 
