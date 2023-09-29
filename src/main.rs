@@ -185,9 +185,15 @@ where
 
             println!("Adding reaction to message: {:?}", add_reaction_req);
 
-            let add_reaction_resp = session.reactions_add(&add_reaction_req).await?;
-            println!("Reaction added: {:?}", add_reaction_resp);
-            Ok(())
+            let add_reaction_resp = session.reactions_add(&add_reaction_req).await;
+
+            if let Err(error) = add_reaction_resp {
+                eprintln!("Error adding reaction: {}", error);
+                Ok(())
+            } else {
+                println!("Reaction added: {:?}", add_reaction_resp);
+                Ok(())
+            }
         }
         None => {
             println!("No last message ts found, can't add reaction, skipping");
